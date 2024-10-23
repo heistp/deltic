@@ -1,4 +1,6 @@
-# The Tao of DelTiC
+
+The Tao of DelTiC
+=================
 
 (c) 2024 Jonathan Morton
 
@@ -103,3 +105,47 @@ The secondary instance applies SCE marks to ECT packets, provided the primary in
 A third instance drops packets, regardless of their ECN field, and is intended to handle severe overloads for which ECN marks are insufficient.  It has a resonant frequence of 8Hz by default, ie. targets 125ms sojourn time.
 
 The 5:1 ratio of resonant frequencies is intended to give some working headroom between the target sojourn time of each instance and the lowest possible marking threshold of the next higher instance.  The 25ms effective target for RFC-3168 marking should keep traffic adhering to conventional congestion control algorithms closer to full throughput than the 5ms default target of CoDel.
+
+
+ZERNO - Free-Flowing Grain
+--------------------------
+
+*Work in progress…*
+
+
+BOROSHNE - Finely Ground Flour
+------------------------------
+
+BOROSHNE is an adaptation of the Approximate Fairness principle, previously used in CNQ-CoDel-AF, to the DelTiC AQM.  It also implements a further development of CNQ called Tetra Queue, automatically classifying flows according to their queue occupancy which reflects which type of congestion signalling they respond to.
+
+### Tetra Queue
+
+Some previous work with CoDel used a very simple queue discipline to enhance performance with sparse flows.  This CNQ (Cheap Nasty Queuing) simply observes whether a flow already has a packet in the queue when traffic for it arrives.  If it does not, then the packet is directed to a *sparse queue* with strict priority, and a *dummy packet* is inserted into the *bulk queue* for regulation purposes.  This dummy packet, and all other packets for the same flow, must clear the bulk queue before the flow is again eligible to use the sparse queue.
+
+Tetra Queue implements this same mechanism, but also divides the *bulk queue* into three, adding a *quick queue* and a *hog queue*.  Dummy packets are inserted to the *quick queue* which is also the home of flows which maintain a relatively low queue occupancy, consistent with responding to SCE congestion signals.  The *bulk queue* is then intended for traffic responding to conventional congestion signals, which will tend to adopt a greater queue occupancy.  Flows which demonstrably fail to respond to even conventional signals, by significantly exceeding the queue occupancy consistent with such a response, will be directed to the *hog queue* to prevent them interfering with well-behaved traffic.
+
+The *sparse queue* is still served with strict priority, to minimise the latency of non-queue-building traffic.  The other three queues are served using a Weighted Deficit method, ensuring that the delivery rate from each queue is proportional to the *number of flows* occupying it.  The average delivery rate *per flow* will thus tend towards max-min fairness, assuming flows are appropriately classified into each queue.
+
+Deficit-mode fair queuing usually requires choosing a *quantum* by which blocked queues' deficits are cyclically relieved.  A small quantum produces smoother delivery while a large one reduces runtime overhead.  In a weighted variant, the quantum is scaled by the weight.  Tetra Queue sidesteps this issue by waiting until *all* queues are blocked, then taking the weights of the queues and repeatedly doubling them until at least one queue is unblocked.  The resulting *dynamic effective quantum* is close to the minimum required for efficient operation, and is found in logarithmic time.  Another approach would be to use division and comparison to find the true minimum.
+
+Flows are directed to queues using a hysteresis mechanism, with a *target* identifier maintained and updated for each flow.  The thresholds for redirecting traffic to a different queue are a matter for further experimentation.  Presently they are based on comparing the *effective sojourn time* (see below) of the flow against the AQM targets for SCE and conventional signalling.  The direction target is *used* during enqueue and *updated* during dequeue.
+
+Directing a flow already occupying one queue into a new one means that it will temporarily occupy, and be served from, two queues at the same time.  This will cause a degree of out-of-order delivery, which could trigger endpoints into unnecessary retransmissions.  This could in theory be avoided by searching the old queue for all packets belonging to the flow and moving them to the new queue, but this could be a significant additional runtime cost for each such reassignment.  It remains to be seen whether such a measure will be necessary in practice; the present implementation does not include it.
+
+### Approximate Fairness
+
+The fundamental concept underlying Approximate Fairness is the *effective sojourn time* associated with a flow, which may be significantly different from the time each packet physically spends in the queue.  In essence, a flow which only has a small occupancy in the queue should be treated as being less aggressive than one which has a large occupancy in the same queue.
+
+This is captured by dividing the product of the queue sojourn time (ie. the sojourn time of the most recent packet obtained from that queue) and the flow's occupancy of that queue, by the *fair share occupancy* which is the total queue backlog divided by the number of flows occupying it.  The resulting formula simplies to:
+
+`effective_sojourn = queue_sojourn * flow_backlog * queue_flows / queue_backlog`
+
+Applying this to the case where a flow can have packets in more than one queue, as in Tetra Queue, we take the sum of the effective sojourn times in the individual queues as the effective sojourn time for the flow as a whole.  This value is then used for both AQM processing and Tetra Queue direction decisions.
+
+When flows in the same queue respond to the same congestion signals (though not necessarily in the same manner or with the same RTT), their throughputs under Approximate Fairness tend to converge towards max-min fairness, though not as rapidly as with true FQ.  Flows that respond to different congestion signals, which are applied at differing target sojourn times, will experience a throughput bias corresponding to this difference.  It is this bias which Tetra Queue (see above) intends to correct.
+
+### Deficit Mode Shaper
+
+ZERNO, BOROSHNE, and KHLIB inherit the deficit-mode shaper technology first developed for the CAKE qdisc.  As well as avoiding the unnecessary parameter choices and inherent burstiness of token-bucket based shapers, a user-friendly and efficient mechanism for *overhead compensation* is incorporated directly into the shaper.  The configuration syntax provided to userspace is the same as for CAKE and previous CoDel-related work.
+
+Overhead compensation allows for the difference between the packet size as reported by the Linux kernel, which typically includes TCP/IP and Ethernet headers, and the time the packet actually occupies on the wire.  Even on an Ethernet LAN, this will additionally include a trailing checksum and leading preamble, and is subject to a minimum frame size.  The encapsulation overheads of an ADSL link, which are still commonly encountered in home Internet connections, can be considerably larger.  By precisely accounting for these overheads, it becomes unnecessary to prophylactically reduce the configured shaping rate to prevent the encapsulating device's queue from filling.
