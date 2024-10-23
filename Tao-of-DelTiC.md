@@ -1,6 +1,4 @@
-=================
-The Tao of DelTiC
-=================
+# The Tao of DelTiC
 
 (c) 2024 Jonathan Morton
 
