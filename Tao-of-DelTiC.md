@@ -140,7 +140,7 @@ This is captured by dividing the product of the queue sojourn time (ie. the sojo
 
 `effective_sojourn = queue_sojourn * flow_backlog * queue_flows / queue_backlog`
 
-Applying this to the case where a flow can have packets in more than one queue, as in Tetra Queue, we take the sum of the effective sojourn times in the individual queues as the effective sojourn time for the flow as a whole.  This value is then used for both AQM processing and Tetra Queue direction decisions.
+Applying this to the case where a flow can have packets in more than one queue, as in Tetra Queue, we take the sum of the effective sojourn times in the individual queues as the effective sojourn time for the flow as a whole.  This value is then used for both AQM processing and Tetra Queue direction decisions.  Each flow has its own AQM instance, independent from other flows aside from sharing a common jitter compensator.
 
 When flows in the same queue respond to the same congestion signals (though not necessarily in the same manner or with the same RTT), their throughputs under Approximate Fairness tend to converge towards max-min fairness, though not as rapidly as with true FQ.  Flows that respond to different congestion signals, which are applied at differing target sojourn times, will experience a throughput bias corresponding to this difference.  It is this bias which Tetra Queue (see above) intends to correct.
 
